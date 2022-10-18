@@ -5,7 +5,7 @@
  https://opensource.org/licenses/MIT
 -->
 
-# 百度云批量保存
+# PIGCAT's百度云批量保存
 
 ## 使用方法
 

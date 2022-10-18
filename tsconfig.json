@@ -5,7 +5,8 @@
             "ESNext"
         ],
         "target": "ESNext",
-        "downlevelIteration": true
+        "downlevelIteration": true,
+        "outFile":"transfer.user.js"
     }
     
 }

@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         PIGCATS
+// @name         百度云批量保存
 // @name:en_US   BDY Batch Saver
 // @name:zh-CN   百度云批量保存
 // @namespace    System233
