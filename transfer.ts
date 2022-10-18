@@ -1,0 +1,196 @@
+// ==UserScript==
+// @name         PIGCATS
+// @name:en_US   BDY Batch Saver
+// @name:zh-CN   百度云批量保存
+// @namespace    System233
+// @version      0.1
+// @description  批量保存百度云文件
+// @author       System233
+// @match        *://pan.baidu.com/s/*
+// @match        *://yun.baidu.com/s/*
+// @icon         https://t0.gstatic.cn/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://pan.baidu.com&size=64
+// @grant        none
+// @license      GPL-3.0-only
+// @run-at       document-start
+// ==/UserScript==
+
+// Copyright (c) 2022 System233
+//
+// This software is released under the GPL-3.0 License.
+// https://opensource.org/licenses/GPL-3.0
+
+(() => {
+    const logger = Object.assign({}, console);
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const waitForSelector = async <T extends HTMLElement>(selector: string, node?: HTMLElement | Document, timeout?: number): Promise<T> => new Promise((resolve, reject) => {
+        node = node || document;
+        timeout = timeout || 10000;
+        const interval = 50
+        const limit = timeout / interval;;
+        let times = 0;
+        const handler = () => {
+            const el = node.querySelector(selector) as T;
+            if (el) {
+                resolve(el);
+            } else if (times++ > limit) {
+                reject(new Error("waitForSelector timeout: " + selector))
+            } else {
+                setTimeout(handler, interval);
+            }
+        };
+        handler();
+    });
+    function getSelectedFileList() {
+        return Array.from(document.querySelectorAll<HTMLElement>('dd.JS-item-active'));
+    }
+    function getFileList() {
+        return Array.from(document.querySelectorAll<HTMLElement>('dd[_position]'));
+    }
+
+    function select(node: Element, selected: boolean) {
+        const current = node.matches('.JS-item-active');
+        if (current == selected) {
+            return;
+        }
+        node.querySelector('span')?.click();
+    }
+
+    function isDir(el: Element) {
+        return el.querySelector('div[class*=dir]')
+    }
+    const getFileName = (node: Element) => {
+        return node.querySelector<HTMLElement>('a.filename').title;
+    }
+    const doSave = async (path: string) => {
+        await sleep(2000)
+        await waitForSelector('[node-type="shareSave"]', document).then(el => el.click());
+        const waitForLoading = async () => {
+            const list = await waitForSelector('.treeview-root-content', document);
+            while (document.querySelector('.treeview-leaf-loading') != null || list.children.length == 0) {
+                await sleep(100);
+            }
+        }
+
+        let lastIndex = 0, index = 0;
+        while (index < path.length) {
+            index = path.indexOf('/', index + 1);
+            if (index == -1) {
+                index = path.length;
+            }
+            const current = path.substring(0, index);
+            await waitForLoading();
+            let node = document.querySelector(`[node-path="${current}"]`) as HTMLElement;
+            if (node == null) {
+                const name = path.substring(lastIndex + 1, index)
+                await waitForSelector('.g-button[title="新建文件夹"]', document).then(el => el.click());
+                await waitForSelector<HTMLInputElement>('input.shareFolderInput', document).then(el => el.value = name);
+                await waitForSelector('span.shareFolderConfirm', document).then(el => el.click());
+                node = await waitForSelector(`[node-path="${current}"]`, document);
+            }
+            lastIndex = index;
+            node.click();
+            node.scrollIntoView()
+        }
+        await waitForSelector('[node-type="confirm"]', document).then(el => el.click());
+
+        await sleep(100);
+        await waitForSelector('.module-canvas-special-cancel', document).then(el => el.click());
+        while (true) {
+            if (document.querySelector('.after-trans-dialog')) {
+                return true;
+            }
+            if (document.querySelector('.vip-guide-intro-tip')) {
+                await waitForSelector('.dialog-close', document).then(el => el.click());
+                return false;
+            }
+            await sleep(50);
+        }
+    }
+    const doJoinTransfer = async (file: HTMLElement, path: string) => {
+        const name = getFileName(file);
+        const newpath = `${path}/${name}`;
+        logger.log("进入目录", newpath)
+        await waitForSelector('.filename', file).then(x => x.click());
+        await sleep(100);
+        let files = [], times = 0;
+        for (let i = 0; i < 20 && times < 3; ++i) {
+            await waitForSelector('[style*="visibility: hidden;"] .spinner', document);
+            await sleep(100);
+            let next = getFileList();
+            if (next.length == files.length) {
+                times++;
+            } else {
+                times = 0;
+            }
+            files = next;
+        }
+        logger.log("目录内容", files.length);
+        await doTransfer(files, newpath);
+        await waitForSelector('a[data-deep="-1"]', document).then(x => x.click())
+        await sleep(50);
+        logger.log("离开目录", newpath)
+    }
+    const doTransfer = async (files: HTMLElement[], path: string, start?: number, end?: number) => {
+        if (start == null) {
+            start = 0;
+        }
+        if (end == null) {
+            end = files.length - 1;
+        }
+        if (end - start < 0) {
+            return;
+        }
+        logger.log("保存路径", path, files.length, `[${start}:${end}]`);
+        files.forEach((file, i) => select(file, i >= start && i <= end));
+        if (!await doSave(path)) {
+            logger.log("正在切分", path)
+            if (files.length == 1 || start == end) {
+                await doJoinTransfer(files[0], path);
+            } else {
+                const mid = Math.floor((start + end) / 2);
+                await doTransfer(files, path, start, mid);
+                await doTransfer(files, path, mid + 1, end);
+            }
+        } else {
+            logger.log("保存成功", path);
+        }
+
+    }
+    const getLastPath = async () => {
+        const name = await waitForSelector('.user-name', document).then(x => x.innerHTML);
+        return localStorage.getItem(`${name}_transfer_save_path`).split('?')[0];
+    }
+    const setLastPath = async (value: string) => {
+        const name = await waitForSelector('.user-name', document).then(x => x.innerHTML);
+        localStorage.setItem(`${name}_transfer_save_path`, `${value}?${Date.now()}`);
+    }
+    const getSelectedPath = async () => {
+        if (document.querySelector('.save-path-item.check')) {
+            return await getLastPath();
+        }
+        return await waitForSelector('.treeview-node-on [node-path]', document).then(x => x.getAttribute('node-path'))
+    }
+    const transfer = async () => {
+        await waitForSelector('[node-type="shareSave"]', document).then(el => el.click());
+        const confirm = await waitForSelector('[node-type="confirm"]', document);
+        confirm.addEventListener('click', async e => {
+            e.stopImmediatePropagation();
+            waitForSelector('.dialog-control span', document).then(x => x.click()).catch(logger.error);
+            const files = getSelectedFileList();
+            const path = await getSelectedPath();
+            logger.log("开始转存", files.length)
+            await doTransfer(files, path);
+            await setLastPath(path);
+        }, true);
+    }
+
+    const load = () => {
+        const html = `<a class="g-button" href="javascript:;" title="批量保存到网盘"><span class="g-button-right"><em class="icon icon-save-disk" title="批量保存到网盘"></em><span class="text" style="width: auto;">批量保存到网盘</span></span></a>`
+        const div = document.createElement('div');
+        div.innerHTML = html;
+        const a = div.children[0];
+        a.addEventListener('click', transfer);
+        waitForSelector('[node-type="shareSave"]', document).then(node => node.after(a))
+    }
+    load();
+})();
