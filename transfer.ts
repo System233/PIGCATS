@@ -3,7 +3,7 @@
 // @name:en_US   BDY Batch Saver
 // @name:zh-CN   百度云批量保存
 // @namespace    System233
-// @version      0.1
+// @version      0.2
 // @description  批量保存百度云文件
 // @author       System233
 // @match        *://pan.baidu.com/s/*
@@ -12,6 +12,8 @@
 // @grant        none
 // @license      GPL-3.0-only
 // @run-at       document-start
+// @source       https://github.com/System233/PIGCATS
+// @notes        20221117 v0.2 修复嵌套文件夹保存问题
 // ==/UserScript==
 
 // Copyright (c) 2022 System233
@@ -125,7 +127,14 @@
             files = next;
         }
         logger.log("目录内容", files.length);
-        await doTransfer(files, newpath);
+        // await doTransfer(files, newpath);
+        
+        const start=0;
+        const end=files.length-1;
+        const mid = Math.floor((start + end) / 2);
+        await doTransfer(files, newpath, start, mid);
+        await doTransfer(files, newpath, mid + 1, end);
+
         await waitForSelector('a[data-deep="-1"]', document).then(x => x.click())
         await sleep(50);
         logger.log("离开目录", newpath)
@@ -145,7 +154,7 @@
         if (!await doSave(path)) {
             logger.log("正在切分", path)
             if (files.length == 1 || start == end) {
-                await doJoinTransfer(files[0], path);
+                await doJoinTransfer(files[start], path);
             } else {
                 const mid = Math.floor((start + end) / 2);
                 await doTransfer(files, path, start, mid);
