@@ -3,7 +3,7 @@
 // @name:en_US   BDY Batch Saver
 // @name:zh-CN   百度云批量保存
 // @namespace    System233
-// @version      0.2
+// @version      0.3
 // @description  批量保存百度云文件
 // @author       System233
 // @match        *://pan.baidu.com/s/*
@@ -13,6 +13,7 @@
 // @license      GPL-3.0-only
 // @run-at       document-start
 // @source       https://github.com/System233/PIGCATS
+// @notes        20231226 v0.3 修复不识别新弹窗的问题
 // @notes        20221117 v0.2 修复嵌套文件夹保存问题
 // ==/UserScript==
 // Copyright (c) 2022 System233
@@ -63,6 +64,7 @@
         return node.querySelector('a.filename').title;
     };
     const doSave = async (path) => {
+        logger.log('正在保存', path);
         await sleep(2000);
         await waitForSelector('[node-type="shareSave"]', document).then(el => el.click());
         const waitForLoading = async () => {
@@ -96,9 +98,17 @@
         await waitForSelector('.module-canvas-special-cancel', document).then(el => el.click());
         while (true) {
             if (document.querySelector('.after-trans-dialog')) {
+                logger.log('保存成功', path);
                 return true;
             }
+            const iframe = document.querySelector('iframe.buy-guide-iframe-coupon[src*=buy]');
+            if (iframe && iframe.contentDocument.querySelector('[class*=close]')) {
+                logger.log('保存失败', path);
+                Array.from(iframe.contentDocument.querySelectorAll('[class*=close]'), (e) => e.click());
+                return false;
+            }
             if (document.querySelector('.vip-guide-intro-tip')) {
+                logger.log('保存失败.old', path);
                 await waitForSelector('.dialog-close', document).then(el => el.click());
                 return false;
             }
@@ -107,8 +117,8 @@
     };
     const doJoinTransfer = async (file, path) => {
         const name = getFileName(file);
-        const newpath = `${path}/${name}`;
-        logger.log("进入目录", newpath);
+        const newPath = `${path}${path.endsWith('/') ? '' : '/'}${name}`;
+        logger.log("进入目录", newPath);
         await waitForSelector('.filename', file).then(x => x.click());
         await sleep(100);
         let files = [], times = 0;
@@ -129,11 +139,11 @@
         const start = 0;
         const end = files.length - 1;
         const mid = Math.floor((start + end) / 2);
-        await doTransfer(files, newpath, start, mid);
-        await doTransfer(files, newpath, mid + 1, end);
+        await doTransfer(files, newPath, start, mid);
+        await doTransfer(files, newPath, mid + 1, end);
         await waitForSelector('a[data-deep="-1"]', document).then(x => x.click());
         await sleep(50);
-        logger.log("离开目录", newpath);
+        logger.log("离开目录", newPath);
     };
     const doTransfer = async (files, path, start, end) => {
         if (start == null) {
@@ -182,11 +192,16 @@
         confirm.addEventListener('click', async (e) => {
             e.stopImmediatePropagation();
             waitForSelector('.dialog-control span', document).then(x => x.click()).catch(logger.error);
-            const files = getSelectedFileList();
-            const path = await getSelectedPath();
-            logger.log("开始转存", files.length);
-            await doTransfer(files, path);
-            await setLastPath(path);
+            try {
+                const files = getSelectedFileList();
+                const path = await getSelectedPath();
+                logger.log("开始转存", files.length);
+                await doTransfer(files, path);
+                await setLastPath(path);
+            }
+            catch (err) {
+                logger.error('发生错误', err);
+            }
         }, true);
     };
     const load = () => {
